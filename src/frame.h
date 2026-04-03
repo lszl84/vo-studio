@@ -50,6 +50,7 @@ private:
     void OnUpdateStop(wxUpdateUIEvent& event);
     void OnUpdatePlay(wxUpdateUIEvent& event);
     void OnTimer(wxTimerEvent& event);
+    void OnCharHook(wxKeyEvent& event);
     
     wxPanel* CreateLeftPanel();
     

@@ -83,6 +83,16 @@ wxString AudioListPanel::GetSelectedFilename() const
     return wxEmptyString;
 }
 
+void AudioListPanel::SelectLastItem()
+{
+    if (!document || document->audioClips.empty())
+        return;
+    
+    int lastIndex = static_cast<int>(document->audioClips.size()) - 1;
+    listCtrl->SetItemState(lastIndex, wxLIST_STATE_SELECTED, wxLIST_STATE_SELECTED);
+    listCtrl->EnsureVisible(lastIndex);
+}
+
 void AudioListPanel::OnItemSelected(wxListEvent& event)
 {
     // Selection changed - could emit event if needed

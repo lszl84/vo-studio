@@ -172,9 +172,6 @@ bool AudioEngine::StartPlayback(const std::string& filepath)
 
 void AudioEngine::StopPlayback()
 {
-    if (!playing.load())
-        return;
-    
     playing.store(false);
     
     if (playbackDevice)

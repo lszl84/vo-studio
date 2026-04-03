@@ -14,6 +14,7 @@ public:
     
     int GetSelectedIndex() const;
     wxString GetSelectedFilename() const;
+    void SelectLastItem();
     
     // Events
     wxEvtHandler* GetEventHandler() { return this; }

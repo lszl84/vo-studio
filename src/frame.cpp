@@ -13,6 +13,7 @@
 #include <wx/filedlg.h>
 #include <wx/msgdlg.h>
 #include <wx/thread.h>
+#include <wx/textctrl.h>
 #include <filesystem>
 #include <fstream>
 #include <chrono>
@@ -33,6 +34,7 @@ wxBEGIN_EVENT_TABLE(Frame, wxDocParentFrame)
     EVT_UPDATE_UI(ID_PLAY, Frame::OnUpdatePlay)
     EVT_TIMER(wxID_ANY, Frame::OnTimer)
     EVT_THREAD(ID_ANALYSIS_COMPLETE, Frame::OnAnalysisComplete)
+    EVT_CHAR_HOOK(Frame::OnCharHook)
 wxEND_EVENT_TABLE()
 
 Frame::Frame(wxDocManager* manager, wxFrame* frame, wxWindowID id, const wxString& title,
@@ -146,9 +148,9 @@ void Frame::BuildMenuBar()
     
     // Transport menu
     wxMenu* transportMenu = new wxMenu;
-    transportMenu->Append(ID_RECORD, "&Record\tSpace");
-    transportMenu->Append(ID_STOP, "&Stop\tEsc");
-    transportMenu->Append(ID_PLAY, "&Play\tReturn");
+    transportMenu->Append(ID_RECORD, "&Record\tCtrl+Shift+R");
+    transportMenu->Append(ID_STOP, "&Stop\tCtrl+Shift+S");
+    transportMenu->Append(ID_PLAY, "&Play\tCtrl+Shift+P");
     
     menuBar->Append(transportMenu, "&Transport");
     
@@ -304,7 +306,8 @@ void Frame::OnStop(wxCommandEvent& event)
             currentRecordingPath.clear();
             audioListPanel->RefreshList();
             
-            // Trigger analysis
+            // Auto-select the last recorded clip and start analysis
+            audioListPanel->SelectLastItem();
             StartAnalysisThread();
         }
         
@@ -369,6 +372,62 @@ void Frame::OnTimer(wxTimerEvent& event)
             statusBar->SetStatusText(wxString::Format("Playing: %.1f / %.1f s", pos, dur));
         }
     }
+}
+
+void Frame::OnCharHook(wxKeyEvent& event)
+{
+    const int keyCode = event.GetKeyCode();
+    const int modifiers = event.GetModifiers();
+
+    auto sendCommand = [this](int id) {
+        wxCommandEvent cmd(wxEVT_MENU, id);
+        ProcessWindowEvent(cmd);
+    };
+
+    // Global hotkeys with Ctrl+Shift (don't interfere with text editing)
+    if ((modifiers & wxMOD_CONTROL) && (modifiers & wxMOD_SHIFT))
+    {
+        if (keyCode == 'R' || keyCode == 'r')
+        {
+            // Toggle record/stop
+            if (audioEngine->IsRecording())
+                sendCommand(ID_STOP);
+            else
+                sendCommand(ID_RECORD);
+            return;
+        }
+        
+        if (keyCode == 'S' || keyCode == 's')
+        {
+            sendCommand(ID_STOP);
+            return;
+        }
+        
+        if (keyCode == 'P' || keyCode == 'p')
+        {
+            sendCommand(ID_PLAY);
+            return;
+        }
+    }
+
+    // Escape always stops (global)
+    if (keyCode == WXK_ESCAPE)
+    {
+        sendCommand(ID_STOP);
+        return;
+    }
+
+    // Return plays selected clip (only if not in text control)
+    wxWindow* focus = FindFocus();
+    bool inTextControl = focus && wxDynamicCast(focus, wxTextCtrl);
+    
+    if (!inTextControl && keyCode == WXK_RETURN)
+    {
+        sendCommand(ID_PLAY);
+        return;
+    }
+
+    event.Skip();
 }
 
 void Frame::StartAnalysisThread()
