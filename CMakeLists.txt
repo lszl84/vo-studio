@@ -36,10 +36,8 @@ set(SRCS
     src/app.h
     src/frame.cpp
     src/frame.h
-    src/project_document.cpp
-    src/project_document.h
-    src/project_view.cpp
-    src/project_view.h
+    src/workspace.cpp
+    src/workspace.h
     src/text_panel.cpp
     src/text_panel.h
     src/audio_list_panel.cpp

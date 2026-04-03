@@ -1,123 +1,177 @@
 #include "frame.h"
 #include "text_panel.h"
 #include "audio_list_panel.h"
-#include "project_document.h"
-#include "project_view.h"
+#include "workspace.h"
 #include "audio_engine.h"
 #include "lufs_analyzer.h"
-#include "app.h"
 
 #include <wx/sizer.h>
 #include <wx/menu.h>
-#include <wx/toolbar.h>
 #include <wx/filedlg.h>
+#include <wx/dirdlg.h>
 #include <wx/msgdlg.h>
 #include <wx/thread.h>
 #include <wx/textctrl.h>
 #include <filesystem>
 #include <fstream>
 #include <chrono>
+
 namespace fs = std::filesystem;
 
-wxBEGIN_EVENT_TABLE(Frame, wxDocParentFrame)
-    EVT_MENU(ID_LOAD_SCRIPT, Frame::OnLoadScript)
+wxBEGIN_EVENT_TABLE(Frame, wxFrame)
+    EVT_MENU(wxID_NEW, Frame::OnNewProject)
+    EVT_MENU(wxID_OPEN, Frame::OnOpenProject)
+    EVT_MENU(ID_IMPORT_SCRIPT, Frame::OnImportScript)
     EVT_MENU(ID_TEXT_SIZE_INC, Frame::OnTextSizeIncrease)
     EVT_MENU(ID_TEXT_SIZE_DEC, Frame::OnTextSizeDecrease)
     EVT_MENU(wxID_EXIT, Frame::OnExit)
     EVT_MENU(ID_RECORD, Frame::OnRecord)
     EVT_MENU(ID_STOP, Frame::OnStop)
     EVT_MENU(ID_PLAY, Frame::OnPlay)
-    EVT_MENU(wxID_OPEN, Frame::OnLoadScript)
-    EVT_BUTTON(ID_RECORD, Frame::OnRecord)
+    EVT_BUTTON(wxID_NEW, Frame::OnNewProject)
+    EVT_BUTTON(wxID_OPEN, Frame::OnOpenProject)
+    EVT_BUTTON(ID_RECORD, Frame::OnRecordButtonClick)
     EVT_UPDATE_UI(ID_RECORD, Frame::OnUpdateRecord)
     EVT_UPDATE_UI(ID_STOP, Frame::OnUpdateStop)
     EVT_UPDATE_UI(ID_PLAY, Frame::OnUpdatePlay)
     EVT_TIMER(wxID_ANY, Frame::OnTimer)
     EVT_THREAD(ID_ANALYSIS_COMPLETE, Frame::OnAnalysisComplete)
     EVT_CHAR_HOOK(Frame::OnCharHook)
+    EVT_CLOSE(Frame::OnClose)
 wxEND_EVENT_TABLE()
 
-Frame::Frame(wxDocManager* manager, wxFrame* frame, wxWindowID id, const wxString& title,
+Frame::Frame(wxWindow* parent, wxWindowID id, const wxString& title,
              const wxPoint& pos, const wxSize& size)
-    : wxDocParentFrame(manager, frame, id, title, pos, size)
+    : wxFrame(parent, id, title, pos, size)
 {
-    // Initialize audio engine
     audioEngine = new AudioEngine();
     audioEngine->Initialize();
-    
-    // Create main layout
-    splitter = new wxSplitterWindow(this, wxID_ANY, wxDefaultPosition, wxDefaultSize,
-                                    wxSP_BORDER | wxSP_LIVE_UPDATE);
-    splitter->SetMinimumPaneSize(FromDIP(200));
-    
-    // Left panel with audio list
-    wxPanel* leftPanel = CreateLeftPanel();
-    
-    // Center panel with text
-    centerPanel = new wxPanel(splitter, wxID_ANY);
-    textPanel = new TextPanel(centerPanel);
-    
-    wxBoxSizer* centerSizer = new wxBoxSizer(wxVERTICAL);
-    centerSizer->Add(textPanel, 1, wxEXPAND | wxALL, FromDIP(5));
-    centerPanel->SetSizer(centerSizer);
-    
-    splitter->SplitVertically(leftPanel, centerPanel);
-    splitter->SetSashPosition(FromDIP(280));
-    
+
     SetSize(FromDIP(1000), FromDIP(700));
     SetMinSize({FromDIP(600), FromDIP(400)});
-    
+
+    // Frame sizer manages welcome vs editor
+    wxBoxSizer* frameSizer = new wxBoxSizer(wxVERTICAL);
+    SetSizer(frameSizer);
+
     BuildMenuBar();
-    // BuildToolbar();  // Disable toolbar for now - causing GTK issues
-    
-    // Create status bar early to avoid null pointer issues
-    CreateStatusBar();
-    
-    // Timer for UI updates
+    CreateStatusBar(2);
+    SetStatusWidths(2, (const int[]){-1, -3});
+
     timer = new wxTimer(this);
     timer->Start(100);
-    
+
+    ShowWelcome();
     Center();
+}
+
+void Frame::ShowWelcome()
+{
+    if (splitter)
+        splitter->Hide();
+
+    if (!welcomePanel)
+    {
+        welcomePanel = new wxPanel(this, wxID_ANY);
+
+        wxBoxSizer* outer = new wxBoxSizer(wxVERTICAL);
+        outer->AddStretchSpacer(1);
+
+        wxStaticText* appTitle = new wxStaticText(welcomePanel, wxID_ANY, "VO Studio");
+        wxFont titleFont = appTitle->GetFont();
+        titleFont.SetPointSize(FromDIP(12));
+        titleFont.SetWeight(wxFONTWEIGHT_BOLD);
+        appTitle->SetFont(titleFont);
+
+        wxButton* newBtn = new wxButton(welcomePanel, wxID_NEW, "New Project...",
+                                        wxDefaultPosition, FromDIP(wxSize(200, 36)));
+        wxButton* openBtn = new wxButton(welcomePanel, wxID_OPEN, "Open Project...",
+                                         wxDefaultPosition, FromDIP(wxSize(200, 36)));
+
+        outer->Add(appTitle, 0, wxALIGN_CENTER | wxBOTTOM, FromDIP(20));
+        outer->Add(newBtn, 0, wxALIGN_CENTER | wxBOTTOM, FromDIP(8));
+        outer->Add(openBtn, 0, wxALIGN_CENTER);
+        outer->AddStretchSpacer(1);
+
+        welcomePanel->SetSizer(outer);
+        GetSizer()->Add(welcomePanel, 1, wxEXPAND);
+    }
+
+    welcomePanel->Show();
+    GetSizer()->Layout();
+}
+
+void Frame::ShowEditor()
+{
+    if (welcomePanel)
+        welcomePanel->Hide();
+
+    if (!splitter)
+    {
+        splitter = new wxSplitterWindow(this, wxID_ANY, wxDefaultPosition, wxDefaultSize,
+                                        wxSP_BORDER | wxSP_LIVE_UPDATE);
+        splitter->SetMinimumPaneSize(FromDIP(200));
+
+        wxPanel* leftPanel = CreateLeftPanel();
+
+        centerPanel = new wxPanel(splitter, wxID_ANY);
+        textPanel = new TextPanel(centerPanel);
+
+        wxBoxSizer* centerSizer = new wxBoxSizer(wxVERTICAL);
+        centerSizer->Add(textPanel, 1, wxEXPAND | wxALL, FromDIP(5));
+        centerPanel->SetSizer(centerSizer);
+
+        splitter->SplitVertically(leftPanel, centerPanel);
+        splitter->SetSashPosition(FromDIP(280));
+        GetSizer()->Add(splitter, 1, wxEXPAND);
+    }
+
+    splitter->Show();
+    GetSizer()->Layout();
 }
 
 Frame::~Frame()
 {
     StopAnalysisThread();
-    
+
     if (timer)
     {
         timer->Stop();
         delete timer;
     }
-    
+
     if (audioEngine)
     {
         audioEngine->Shutdown();
         delete audioEngine;
+    }
+
+    if (workspace)
+    {
+        workspace->Close();
+        delete workspace;
     }
 }
 
 wxPanel* Frame::CreateLeftPanel()
 {
     wxPanel* panel = new wxPanel(splitter, wxID_ANY);
-    
-    // Title label
+
     wxStaticText* title = new wxStaticText(panel, wxID_ANY, "Recorded Clips");
     wxFont boldFont = title->GetFont();
     boldFont.SetWeight(wxFONTWEIGHT_BOLD);
     title->SetFont(boldFont);
-    
-    // Audio list
+
     audioListPanel = new AudioListPanel(panel);
-    
-    // Record button
-    wxButton* recordBtn = new wxButton(panel, ID_RECORD, "Record", wxDefaultPosition, wxSize(FromDIP(120), FromDIP(35)));
-    
+
+    recordBtn = new wxButton(panel, ID_RECORD, "Record",
+                             wxDefaultPosition, wxSize(FromDIP(120), FromDIP(35)));
+
     wxBoxSizer* sizer = new wxBoxSizer(wxVERTICAL);
     sizer->Add(title, 0, wxALL, FromDIP(10));
     sizer->Add(audioListPanel, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, FromDIP(5));
     sizer->Add(recordBtn, 0, wxALIGN_CENTER | wxALL, FromDIP(10));
-    
+
     panel->SetSizer(sizer);
     return panel;
 }
@@ -125,105 +179,142 @@ wxPanel* Frame::CreateLeftPanel()
 void Frame::BuildMenuBar()
 {
     wxMenuBar* menuBar = new wxMenuBar;
-    
-    // File menu
+
     wxMenu* fileMenu = new wxMenu;
-    fileMenu->Append(wxID_NEW);
-    fileMenu->Append(wxID_OPEN);
-    fileMenu->Append(wxID_SAVE);
-    fileMenu->Append(wxID_SAVEAS);
+    fileMenu->Append(wxID_NEW, "&New Project...\tCtrl+N");
+    fileMenu->Append(wxID_OPEN, "&Open Project...\tCtrl+O");
     fileMenu->AppendSeparator();
-    fileMenu->Append(ID_LOAD_SCRIPT, "&Load Script...\tCtrl+L");
+    fileMenu->Append(ID_IMPORT_SCRIPT, "&Import Script...\tCtrl+L");
     fileMenu->AppendSeparator();
     fileMenu->Append(wxID_EXIT);
-    
+
     menuBar->Append(fileMenu, "&File");
-    
-    // Edit menu
-    wxMenu* editMenu = new wxMenu;
-    editMenu->Append(ID_TEXT_SIZE_INC, "Increase Text Size\tCtrl++");
-    editMenu->Append(ID_TEXT_SIZE_DEC, "Decrease Text Size\tCtrl+-");
-    
-    menuBar->Append(editMenu, "&View");
-    
-    // Transport menu
+
+    wxMenu* viewMenu = new wxMenu;
+    viewMenu->Append(ID_TEXT_SIZE_INC, "Increase Text Size\tCtrl++");
+    viewMenu->Append(ID_TEXT_SIZE_DEC, "Decrease Text Size\tCtrl+-");
+
+    menuBar->Append(viewMenu, "&View");
+
     wxMenu* transportMenu = new wxMenu;
     transportMenu->Append(ID_RECORD, "&Record\tCtrl+/");
     transportMenu->Append(ID_STOP, "&Stop\tEsc");
     transportMenu->Append(ID_PLAY, "&Play\tCtrl+Space");
-    
+
     menuBar->Append(transportMenu, "&Transport");
-    
+
     SetMenuBar(menuBar);
 }
 
-void Frame::BuildToolbar()
+void Frame::UpdateTitle()
 {
-    wxToolBar* toolbar = CreateToolBar(wxTB_FLAT | wxTB_HORIZONTAL);
-    
-    toolbar->AddTool(ID_RECORD, "Record", wxNullBitmap, "Start recording");
-    toolbar->AddTool(ID_STOP, "Stop", wxNullBitmap, "Stop recording/playback");
-    toolbar->AddTool(ID_PLAY, "Play", wxNullBitmap, "Play selected clip");
-    toolbar->AddSeparator();
-    toolbar->AddTool(ID_LOAD_SCRIPT, "Open Script", wxNullBitmap, "Load script file");
-    
-    toolbar->Realize();
+    wxString appName = wxTheApp->GetAppDisplayName();
+    if (workspace && workspace->IsOpen())
+    {
+        wxString dirName = wxString(workspace->GetDirectory().filename().string());
+        SetTitle(dirName + " - " + appName);
+        SetStatusText(wxString(workspace->GetDirectory().string()), 1);
+    }
+    else
+    {
+        SetTitle(appName);
+        SetStatusText(wxEmptyString, 1);
+    }
 }
 
-void Frame::SetupView(ProjectView* view)
+void Frame::OpenWorkspace(const wxString& path)
 {
-    if (!view)
+    StopAnalysisThread();
+
+    if (workspace)
     {
-        currentDoc = nullptr;
-        textPanel->SetText(wxEmptyString);
-        audioListPanel->SetDocument(nullptr);
-        SetTitle(wxTheApp->GetAppDisplayName());
+        workspace->Close();
+        delete workspace;
+        workspace = nullptr;
+    }
+
+    workspace = new Workspace();
+    if (!workspace->Open(fs::path(path.ToStdString())))
+    {
+        wxMessageBox("Could not open project folder.", "Error", wxOK | wxICON_ERROR);
+        delete workspace;
+        workspace = nullptr;
         return;
     }
-    
-    currentDoc = view->GetDocument();
-    
-    if (currentDoc)
-    {
-        textPanel->SetText(currentDoc->scriptText);
-        textPanel->SetTextSize(currentDoc->textSize);
-        audioListPanel->SetDocument(currentDoc);
-        
-        // Start analysis thread for unanalyzed clips
-        StartAnalysisThread();
-    }
+
+    LoadWorkspaceIntoUI();
 }
 
-void Frame::RefreshText()
+void Frame::LoadWorkspaceIntoUI()
 {
-    if (currentDoc && textPanel)
-    {
-        textPanel->SetText(currentDoc->scriptText);
-    }
+    if (!workspace)
+        return;
+
+    ShowEditor();
+    textPanel->SetText(workspace->GetScriptText());
+    textPanel->SetTextSize(workspace->GetTextSize());
+    audioListPanel->SetWorkspace(workspace);
+    UpdateTitle();
+    StartAnalysisThread();
 }
 
-void Frame::RefreshAudioList()
+// --- Menu handlers ---
+
+void Frame::OnNewProject(wxCommandEvent& event)
 {
-    if (audioListPanel)
+    wxDirDialog dlg(this, "Create New Project Folder",
+                    wxEmptyString, wxDD_DEFAULT_STYLE);
+
+    if (dlg.ShowModal() != wxID_OK)
+        return;
+
+    StopAnalysisThread();
+
+    if (workspace)
     {
-        audioListPanel->RefreshList();
+        workspace->Close();
+        delete workspace;
     }
+
+    workspace = new Workspace();
+    if (!workspace->Create(fs::path(dlg.GetPath().ToStdString())))
+    {
+        wxMessageBox("Could not create project folder.", "Error", wxOK | wxICON_ERROR);
+        delete workspace;
+        workspace = nullptr;
+        return;
+    }
+
+    LoadWorkspaceIntoUI();
 }
 
-void Frame::OnLoadScript(wxCommandEvent& event)
+void Frame::OnOpenProject(wxCommandEvent& event)
 {
-    wxFileDialog dlg(this, "Load Script", wxEmptyString, wxEmptyString,
+    wxDirDialog dlg(this, "Open Project Folder",
+                    wxEmptyString, wxDD_DEFAULT_STYLE);
+
+    if (dlg.ShowModal() != wxID_OK)
+        return;
+
+    OpenWorkspace(dlg.GetPath());
+}
+
+void Frame::OnImportScript(wxCommandEvent& event)
+{
+    if (!workspace || !workspace->IsOpen())
+    {
+        wxMessageBox("Open or create a project first.", "No Project", wxOK | wxICON_INFORMATION);
+        return;
+    }
+
+    wxFileDialog dlg(this, "Import Script", wxEmptyString, wxEmptyString,
                      "Text files (*.txt)|*.txt|All files (*.*)|*.*",
                      wxFD_OPEN | wxFD_FILE_MUST_EXIST);
-    
+
     if (dlg.ShowModal() == wxID_OK)
     {
-        textPanel->LoadTextFile(dlg.GetPath());
-        if (currentDoc)
-        {
-            currentDoc->scriptText = textPanel->GetText();
-            currentDoc->Modify(true);
-        }
+        workspace->ImportScript(dlg.GetPath());
+        textPanel->SetText(workspace->GetScriptText());
     }
 }
 
@@ -231,11 +322,8 @@ void Frame::OnTextSizeIncrease(wxCommandEvent& event)
 {
     int size = textPanel->GetTextSize();
     textPanel->SetTextSize(size + 2);
-    if (currentDoc)
-    {
-        currentDoc->textSize = size + 2;
-        currentDoc->Modify(true);
-    }
+    if (workspace)
+        workspace->SetTextSize(size + 2);
 }
 
 void Frame::OnTextSizeDecrease(wxCommandEvent& event)
@@ -244,11 +332,8 @@ void Frame::OnTextSizeDecrease(wxCommandEvent& event)
     if (size > 8)
     {
         textPanel->SetTextSize(size - 2);
-        if (currentDoc)
-        {
-            currentDoc->textSize = size - 2;
-            currentDoc->Modify(true);
-        }
+        if (workspace)
+            workspace->SetTextSize(size - 2);
     }
 }
 
@@ -257,32 +342,47 @@ void Frame::OnExit(wxCommandEvent& event)
     Close(true);
 }
 
+void Frame::OnClose(wxCloseEvent& event)
+{
+    StopAnalysisThread();
+
+    // Save script text before closing
+    if (workspace && workspace->IsOpen())
+    {
+        workspace->SetScriptText(textPanel->GetText());
+        workspace->Close();
+    }
+
+    event.Skip();
+}
+
+// --- Recording ---
+
+void Frame::OnRecordButtonClick(wxCommandEvent& event)
+{
+    if (audioEngine->IsRecording())
+    {
+        wxCommandEvent stopEvt(wxEVT_MENU, ID_STOP);
+        ProcessWindowEvent(stopEvt);
+    }
+    else
+    {
+        wxCommandEvent recEvt(wxEVT_MENU, ID_RECORD);
+        ProcessWindowEvent(recEvt);
+    }
+}
+
 void Frame::OnRecord(wxCommandEvent& event)
 {
-    if (!currentDoc || audioEngine->IsRecording())
+    if (!workspace || !workspace->IsOpen() || audioEngine->IsRecording())
         return;
-    
-    // Ensure project directory exists
-    if (currentDoc->projectDir.empty())
-    {
-        // Use document's directory
-        wxString docPath = currentDoc->GetFilename();
-        if (!docPath.IsEmpty())
-        {
-            currentDoc->projectDir = fs::path(docPath.ToStdString()).parent_path();
-        }
-        else
-        {
-            wxMessageBox("Please save the project first!", "Error", wxOK | wxICON_ERROR);
-            return;
-        }
-    }
-    
-    wxString filename = currentDoc->GetNextClipFilename();
-    currentRecordingPath = (currentDoc->projectDir / filename.ToStdString()).string();
-    
+
+    currentRecordingPath = workspace->GetNextClipPath().ToStdString();
+
     if (audioEngine->StartRecording(currentRecordingPath))
     {
+        if (recordBtn)
+            recordBtn->SetLabel("Stop");
         wxStatusBar* statusBar = GetStatusBar();
         if (statusBar)
             statusBar->SetStatusText("Recording...");
@@ -298,20 +398,19 @@ void Frame::OnStop(wxCommandEvent& event)
     if (audioEngine->IsRecording())
     {
         audioEngine->StopRecording();
-        
-        // Add clip to project using the stored path
-        if (currentDoc && !currentRecordingPath.empty())
+
+        if (recordBtn)
+            recordBtn->SetLabel("Record");
+
+        if (workspace && !currentRecordingPath.empty())
         {
-            currentDoc->AddAudioClip(currentRecordingPath);
+            workspace->ScanClips();
             currentRecordingPath.clear();
             audioListPanel->RefreshList();
-            
-            // Auto-select the last recorded clip AFTER refresh
             audioListPanel->SelectLastItem();
-            
             StartAnalysisThread();
         }
-        
+
         wxStatusBar* statusBar = GetStatusBar();
         if (statusBar)
             statusBar->SetStatusText("Recording stopped");
@@ -319,7 +418,7 @@ void Frame::OnStop(wxCommandEvent& event)
     else if (audioEngine->IsPlaying())
     {
         audioEngine->StopPlayback();
-        
+
         wxStatusBar* statusBar = GetStatusBar();
         if (statusBar)
             statusBar->SetStatusText("Playback stopped");
@@ -328,20 +427,22 @@ void Frame::OnStop(wxCommandEvent& event)
 
 void Frame::OnPlay(wxCommandEvent& event)
 {
-    if (!currentDoc || audioEngine->IsRecording() || audioEngine->IsPlaying())
+    if (!workspace || audioEngine->IsRecording() || audioEngine->IsPlaying())
         return;
-    
+
     int idx = audioListPanel->GetSelectedIndex();
-    if (idx >= 0 && idx < static_cast<int>(currentDoc->audioClips.size()))
+    auto& clips = workspace->GetClips();
+    if (idx >= 0 && idx < static_cast<int>(clips.size()))
     {
-        const auto& clip = currentDoc->audioClips[idx];
-        audioEngine->StartPlayback(clip.filename.ToStdString());
+        const auto& clip = clips[idx];
+        audioEngine->StartPlayback(workspace->GetClipFullPath(clip.filename).ToStdString());
     }
 }
 
 void Frame::OnUpdateRecord(wxUpdateUIEvent& event)
 {
-    event.Enable(!audioEngine->IsRecording() && !audioEngine->IsPlaying() && currentDoc != nullptr);
+    event.Enable(!audioEngine->IsRecording() && !audioEngine->IsPlaying() &&
+                 workspace && workspace->IsOpen());
 }
 
 void Frame::OnUpdateStop(wxUpdateUIEvent& event)
@@ -351,7 +452,7 @@ void Frame::OnUpdateStop(wxUpdateUIEvent& event)
 
 void Frame::OnUpdatePlay(wxUpdateUIEvent& event)
 {
-    event.Enable(!audioEngine->IsRecording() && !audioEngine->IsPlaying() && 
+    event.Enable(!audioEngine->IsRecording() && !audioEngine->IsPlaying() &&
                  audioListPanel->GetSelectedIndex() >= 0);
 }
 
@@ -385,10 +486,8 @@ void Frame::OnCharHook(wxKeyEvent& event)
         ProcessWindowEvent(cmd);
     };
 
-    // Global hotkeys (don't interfere with text editing)
     if ((modifiers & wxMOD_CONTROL) && !(modifiers & wxMOD_SHIFT))
     {
-        // Ctrl+/ for record/stop toggle
         if (keyCode == '/' || keyCode == '?')
         {
             if (audioEngine->IsRecording())
@@ -397,8 +496,7 @@ void Frame::OnCharHook(wxKeyEvent& event)
                 sendCommand(ID_RECORD);
             return;
         }
-        
-        // Ctrl+Space for play
+
         if (keyCode == WXK_SPACE)
         {
             sendCommand(ID_PLAY);
@@ -406,17 +504,15 @@ void Frame::OnCharHook(wxKeyEvent& event)
         }
     }
 
-    // Escape always stops (global)
     if (keyCode == WXK_ESCAPE)
     {
         sendCommand(ID_STOP);
         return;
     }
 
-    // Return plays selected clip (only if not in text control)
     wxWindow* focus = FindFocus();
     bool inTextControl = focus && wxDynamicCast(focus, wxTextCtrl);
-    
+
     if (!inTextControl && keyCode == WXK_RETURN)
     {
         sendCommand(ID_PLAY);
@@ -426,13 +522,15 @@ void Frame::OnCharHook(wxKeyEvent& event)
     event.Skip();
 }
 
+// --- Analysis thread ---
+
 void Frame::StartAnalysisThread()
 {
     StopAnalysisThread();
-    
-    if (!currentDoc)
+
+    if (!workspace || !workspace->IsOpen())
         return;
-    
+
     analysisRunning.store(true);
     analysisThread = std::thread(&Frame::AnalysisThreadFunc, this);
 }
@@ -441,40 +539,37 @@ void Frame::StopAnalysisThread()
 {
     analysisRunning.store(false);
     if (analysisThread.joinable())
-    {
         analysisThread.join();
-    }
 }
 
 void Frame::AnalysisThreadFunc()
 {
-    if (!currentDoc)
+    if (!workspace)
         return;
-    
-    // Wait a bit for file to be fully written
+
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    
-    for (size_t i = 0; i < currentDoc->audioClips.size() && analysisRunning.load(); ++i)
+
+    auto& clips = workspace->GetClips();
+    for (size_t i = 0; i < clips.size() && analysisRunning.load(); ++i)
     {
-        auto& clip = currentDoc->audioClips[i];
-        if (!clip.analyzed)
+        if (!clips[i].analyzed)
         {
-            // Check if file exists and has content
-            std::ifstream file(clip.filename.ToStdString(), std::ios::binary);
+            std::string fullPath = workspace->GetClipFullPath(clips[i].filename).ToStdString();
+            std::ifstream file(fullPath, std::ios::binary);
             if (!file.good())
                 continue;
             file.seekg(0, std::ios::end);
-            if (file.tellg() < 100)  // At least 100 bytes (WAV header is ~44 bytes)
+            if (file.tellg() < 100)
                 continue;
             file.close();
-            
-            LufsAnalysis analysis = AnalyzeLufs(clip.filename.ToStdString());
+
+            LufsAnalysis analysis = AnalyzeLufs(fullPath);
             if (analysis.valid && analysisRunning.load())
             {
-                wxThreadEvent* event = new wxThreadEvent(wxEVT_THREAD, ID_ANALYSIS_COMPLETE);
-                event->SetInt(static_cast<int>(i));
-                event->SetPayload(analysis);
-                wxQueueEvent(this, event);
+                wxThreadEvent* evt = new wxThreadEvent(wxEVT_THREAD, ID_ANALYSIS_COMPLETE);
+                evt->SetInt(static_cast<int>(i));
+                evt->SetPayload(analysis);
+                wxQueueEvent(this, evt);
             }
         }
     }
@@ -485,18 +580,22 @@ void Frame::OnAnalysisComplete(wxThreadEvent& event)
     int idx = event.GetInt();
     LufsAnalysis analysis = event.GetPayload<LufsAnalysis>();
 
-    if (currentDoc && idx >= 0 && idx < static_cast<int>(currentDoc->audioClips.size()))
+    if (workspace && idx >= 0 && idx < static_cast<int>(workspace->GetClips().size()))
     {
-        // Remember current selection before refresh
         int selectedIdx = audioListPanel->GetSelectedIndex();
 
-        currentDoc->UpdateClipAnalysis(idx, analysis.integratedLufs, analysis.peakDb, analysis.duration);
+        workspace->UpdateClipAnalysis(idx, analysis.integratedLufs, analysis.peakDb, analysis.duration);
         audioListPanel->RefreshList();
 
-        // Restore selection (prefer the newly analyzed item if nothing was selected)
         if (selectedIdx >= 0)
             audioListPanel->SelectItem(selectedIdx);
         else
             audioListPanel->SelectItem(idx);
     }
+}
+
+void Frame::OnScriptChanged(wxCommandEvent& event)
+{
+    if (workspace && workspace->IsOpen())
+        workspace->SetScriptText(textPanel->GetText());
 }
