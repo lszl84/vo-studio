@@ -51,9 +51,6 @@ private:
     void OnUpdatePlay(wxUpdateUIEvent& event);
     void OnTimer(wxTimerEvent& event);
     
-    // Custom events
-    void OnPlayClip(wxCommandEvent& event);
-    
     wxPanel* CreateLeftPanel();
     
     wxSplitterWindow* splitter = nullptr;
@@ -63,6 +60,8 @@ private:
     
     ProjectDocument* currentDoc = nullptr;
     AudioEngine* audioEngine = nullptr;
+    
+    std::string currentRecordingPath;
     
     std::atomic<bool> analysisRunning{false};
     std::thread analysisThread;

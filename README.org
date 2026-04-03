@@ -113,7 +113,8 @@ VO Studio follows the wxWidgets Document/View architecture:
 
 ** License
 
-MIT License - See LICENSE file for details
+GPLv3 License - See LICENSE file for details
+Copyright (C) 2025 luke@devmindscape.com
 
 ** Contributing
 

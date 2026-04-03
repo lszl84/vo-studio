@@ -14,9 +14,6 @@
 #include <wx/msgdlg.h>
 #include <wx/thread.h>
 #include <filesystem>
-#include <iomanip>
-#include <sstream>
-
 namespace fs = std::filesystem;
 
 wxBEGIN_EVENT_TABLE(Frame, wxDocParentFrame)
@@ -28,12 +25,11 @@ wxBEGIN_EVENT_TABLE(Frame, wxDocParentFrame)
     EVT_MENU(ID_STOP, Frame::OnStop)
     EVT_MENU(ID_PLAY, Frame::OnPlay)
     EVT_MENU(wxID_OPEN, Frame::OnLoadScript)
+    EVT_BUTTON(ID_RECORD, Frame::OnRecord)
     EVT_UPDATE_UI(ID_RECORD, Frame::OnUpdateRecord)
     EVT_UPDATE_UI(ID_STOP, Frame::OnUpdateStop)
     EVT_UPDATE_UI(ID_PLAY, Frame::OnUpdatePlay)
     EVT_TIMER(wxID_ANY, Frame::OnTimer)
-    EVT_BUTTON(wxID_ANY, Frame::OnPlayClip)
-    EVT_COMMAND(wxID_ANY, wxEVT_COMMAND_BUTTON_CLICKED, Frame::OnPlayClip)
 wxEND_EVENT_TABLE()
 
 Frame::Frame(wxDocManager* manager, wxFrame* frame, wxWindowID id, const wxString& title,
@@ -110,8 +106,8 @@ wxPanel* Frame::CreateLeftPanel()
     audioListPanel = new AudioListPanel(panel);
     
     // Record button
-    wxButton* recordBtn = new wxButton(panel, ID_RECORD, "● Record");
-    recordBtn->SetForegroundColour(*wxRED);
+    wxButton* recordBtn = new wxButton(panel, ID_RECORD, "Record");
+    recordBtn->SetMinSize(wxSize(FromDIP(100), FromDIP(40)));
     
     wxBoxSizer* sizer = new wxBoxSizer(wxVERTICAL);
     sizer->Add(title, 0, wxALL, FromDIP(10));
@@ -279,17 +275,17 @@ void Frame::OnRecord(wxCommandEvent& event)
     }
     
     wxString filename = currentDoc->GetNextClipFilename();
-    fs::path filepath = currentDoc->projectDir / filename.ToStdString();
+    currentRecordingPath = (currentDoc->projectDir / filename.ToStdString()).string();
     
-    if (audioEngine->StartRecording(filepath.string()))
+    if (audioEngine->StartRecording(currentRecordingPath))
     {
         wxStatusBar* statusBar = GetStatusBar();
-        if (!statusBar)
-        {
-            CreateStatusBar();
-            statusBar = GetStatusBar();
-        }
-        statusBar->SetStatusText("Recording...");
+        if (statusBar)
+            statusBar->SetStatusText("Recording...");
+    }
+    else
+    {
+        currentRecordingPath.clear();
     }
 }
 
@@ -299,16 +295,11 @@ void Frame::OnStop(wxCommandEvent& event)
     {
         audioEngine->StopRecording();
         
-        // Add clip to project
-        if (currentDoc)
+        // Add clip to project using the stored path
+        if (currentDoc && !currentRecordingPath.empty())
         {
-            int idx = currentDoc->nextClipNumber - 2;
-            std::ostringstream oss;
-            oss << std::setw(3) << std::setfill('0') << (idx + 1);
-            wxString filename = wxString(oss.str()) + ".wav";
-            fs::path filepath = currentDoc->projectDir / filename.ToStdString();
-            
-            currentDoc->AddAudioClip(filepath.string());
+            currentDoc->AddAudioClip(currentRecordingPath);
+            currentRecordingPath.clear();
             audioListPanel->RefreshList();
             
             // Trigger analysis
@@ -375,15 +366,6 @@ void Frame::OnTimer(wxTimerEvent& event)
             float dur = audioEngine->GetPlaybackDuration();
             statusBar->SetStatusText(wxString::Format("Playing: %.1f / %.1f s", pos, dur));
         }
-    }
-}
-
-void Frame::OnPlayClip(wxCommandEvent& event)
-{
-    wxString filename = event.GetString();
-    if (!filename.IsEmpty() && !audioEngine->IsRecording() && !audioEngine->IsPlaying())
-    {
-        audioEngine->StartPlayback(filename.ToStdString());
     }
 }
 
