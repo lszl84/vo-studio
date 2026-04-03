@@ -148,9 +148,9 @@ void Frame::BuildMenuBar()
     
     // Transport menu
     wxMenu* transportMenu = new wxMenu;
-    transportMenu->Append(ID_RECORD, "&Record\tCtrl+Shift+R");
-    transportMenu->Append(ID_STOP, "&Stop\tCtrl+Shift+S");
-    transportMenu->Append(ID_PLAY, "&Play\tCtrl+Shift+P");
+    transportMenu->Append(ID_RECORD, "&Record\tCtrl+/");
+    transportMenu->Append(ID_STOP, "&Stop\tEsc");
+    transportMenu->Append(ID_PLAY, "&Play\tCtrl+Space");
     
     menuBar->Append(transportMenu, "&Transport");
     
@@ -306,8 +306,9 @@ void Frame::OnStop(wxCommandEvent& event)
             currentRecordingPath.clear();
             audioListPanel->RefreshList();
             
-            // Auto-select the last recorded clip and start analysis
+            // Auto-select the last recorded clip AFTER refresh
             audioListPanel->SelectLastItem();
+            
             StartAnalysisThread();
         }
         
@@ -384,12 +385,12 @@ void Frame::OnCharHook(wxKeyEvent& event)
         ProcessWindowEvent(cmd);
     };
 
-    // Global hotkeys with Ctrl+Shift (don't interfere with text editing)
-    if ((modifiers & wxMOD_CONTROL) && (modifiers & wxMOD_SHIFT))
+    // Global hotkeys (don't interfere with text editing)
+    if ((modifiers & wxMOD_CONTROL) && !(modifiers & wxMOD_SHIFT))
     {
-        if (keyCode == 'R' || keyCode == 'r')
+        // Ctrl+/ for record/stop toggle
+        if (keyCode == '/' || keyCode == '?')
         {
-            // Toggle record/stop
             if (audioEngine->IsRecording())
                 sendCommand(ID_STOP);
             else
@@ -397,13 +398,8 @@ void Frame::OnCharHook(wxKeyEvent& event)
             return;
         }
         
-        if (keyCode == 'S' || keyCode == 's')
-        {
-            sendCommand(ID_STOP);
-            return;
-        }
-        
-        if (keyCode == 'P' || keyCode == 'p')
+        // Ctrl+Space for play
+        if (keyCode == WXK_SPACE)
         {
             sendCommand(ID_PLAY);
             return;
@@ -488,10 +484,19 @@ void Frame::OnAnalysisComplete(wxThreadEvent& event)
 {
     int idx = event.GetInt();
     LufsAnalysis analysis = event.GetPayload<LufsAnalysis>();
-    
+
     if (currentDoc && idx >= 0 && idx < static_cast<int>(currentDoc->audioClips.size()))
     {
+        // Remember current selection before refresh
+        int selectedIdx = audioListPanel->GetSelectedIndex();
+
         currentDoc->UpdateClipAnalysis(idx, analysis.integratedLufs, analysis.peakDb, analysis.duration);
         audioListPanel->RefreshList();
+
+        // Restore selection (prefer the newly analyzed item if nothing was selected)
+        if (selectedIdx >= 0)
+            audioListPanel->SelectItem(selectedIdx);
+        else
+            audioListPanel->SelectItem(idx);
     }
 }

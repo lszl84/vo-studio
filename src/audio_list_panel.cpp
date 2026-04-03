@@ -87,10 +87,24 @@ void AudioListPanel::SelectLastItem()
 {
     if (!document || document->audioClips.empty())
         return;
-    
+
     int lastIndex = static_cast<int>(document->audioClips.size()) - 1;
-    listCtrl->SetItemState(lastIndex, wxLIST_STATE_SELECTED, wxLIST_STATE_SELECTED);
-    listCtrl->EnsureVisible(lastIndex);
+    SelectItem(lastIndex);
+}
+
+void AudioListPanel::SelectItem(int index)
+{
+    if (index < 0 || index >= listCtrl->GetItemCount())
+        return;
+
+    // First deselect all
+    long item = listCtrl->GetNextItem(-1, wxLIST_NEXT_ALL, wxLIST_STATE_SELECTED);
+    if (item != -1)
+        listCtrl->SetItemState(item, 0, wxLIST_STATE_SELECTED);
+
+    // Select the requested item
+    listCtrl->SetItemState(index, wxLIST_STATE_SELECTED, wxLIST_STATE_SELECTED);
+    listCtrl->EnsureVisible(index);
 }
 
 void AudioListPanel::OnItemSelected(wxListEvent& event)
