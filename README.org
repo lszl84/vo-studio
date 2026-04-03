@@ -1,0 +1,126 @@
+#+TITLE: VO Studio
+#+AUTHOR: OpenCode
+#+DATE: 2025-04-03
+
+* VO Studio
+
+A professional voice-over recording application built with wxWidgets and FFmpeg/libav.
+
+** Features
+
+- Document-based project management using wxDocument/wxView architecture
+- Simple text view for loading and displaying scripts
+- Audio recording with automatic sequential naming (001.wav, 002.wav, etc.)
+- Quick playback preview of recorded clips
+- Real-time LUFS (Loudness Units Full Scale) analysis
+- Peak level detection
+- Text size adjustment for comfortable reading
+
+** Building
+
+*** Requirements
+
+- CMake 3.14+
+- C++20 compiler
+- wxWidgets (fetched automatically via CMake FetchContent)
+- FFmpeg/libav libraries (libavformat, libavcodec, libswresample, libavutil)
+- pkg-config
+
+*** Linux
+
+#+begin_src bash
+mkdir build && cd build
+cmake ..
+cmake --build . -j$(nproc)
+#+end_src
+
+*** macOS
+
+#+begin_src bash
+mkdir build && cd build
+cmake ..
+cmake --build . -j$(sysctl -n hw.ncpu)
+#+end_src
+
+*** Windows (MinGW)
+
+#+begin_src bash
+mkdir build && cd build
+cmake .. -G "MinGW Makefiles"
+cmake --build . -j4
+#+end_src
+
+** Usage
+
+1. Launch VO Studio - a new project is created automatically
+2. Save your project to a location (File > Save As)
+3. Load a script using File > Load Script or Ctrl+L
+4. Click the Record button (or press Space) to start recording
+5. Click Stop (or press Escape) to stop recording
+6. The recorded clip appears in the left panel with LUFS analysis
+7. Double-click a clip to play it back
+8. Use Ctrl++ and Ctrl+- to adjust text size
+
+** Project Structure
+
+- *.voproj files :: Project files containing script text and clip metadata
+- 001.wav, 002.wav, etc. :: Auto-named recorded audio files
+- Audio files are stored in the same directory as the project file
+
+** Keyboard Shortcuts
+
+| Key       | Action              |
+|-----------+---------------------|
+| Space     | Start recording     |
+| Escape    | Stop recording/play |
+| Return    | Play selected clip  |
+| Ctrl+L    | Load script         |
+| Ctrl++    | Increase text size  |
+| Ctrl+-    | Decrease text size  |
+| Ctrl+N    | New project         |
+| Ctrl+O    | Open project        |
+| Ctrl+S    | Save project        |
+
+** Technical Details
+
+*** Audio Engine
+
+The application uses miniaudio (single-header library) for:
+- Recording to WAV format (48kHz, mono, float32)
+- Playback of recorded clips
+- Cross-platform audio device management
+
+*** LUFS Analysis
+
+Loudness analysis is performed using FFmpeg/libav:
+- Integrated LUFS (entire file)
+- Short-term LUFS (3-second window)
+- Momentary LUFS (400ms window)
+- True peak detection
+- EBU R128 standard compliance
+
+Analysis runs in a background thread to keep the UI responsive.
+
+** Architecture
+
+VO Studio follows the wxWidgets Document/View architecture:
+
+- ProjectDocument :: Stores project data (script text, clip list, text size)
+- ProjectView :: Handles view-specific operations
+- Frame :: Main window with splitter layout
+- AudioEngine :: Recording/playback using miniaudio
+- LufsAnalyzer :: FFmpeg-based loudness analysis
+
+** License
+
+MIT License - See LICENSE file for details
+
+** Contributing
+
+Contributions are welcome! Please feel free to submit issues or pull requests.
+
+** Acknowledgments
+
+- wxWidgets team for the excellent cross-platform GUI framework
+- David Reid for miniaudio
+- FFmpeg team for the multimedia framework
