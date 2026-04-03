@@ -106,13 +106,12 @@ wxPanel* Frame::CreateLeftPanel()
     audioListPanel = new AudioListPanel(panel);
     
     // Record button
-    wxButton* recordBtn = new wxButton(panel, ID_RECORD, "Record");
-    recordBtn->SetMinSize(wxSize(FromDIP(100), FromDIP(40)));
+    wxButton* recordBtn = new wxButton(panel, ID_RECORD, "Record", wxDefaultPosition, wxSize(FromDIP(120), FromDIP(35)));
     
     wxBoxSizer* sizer = new wxBoxSizer(wxVERTICAL);
     sizer->Add(title, 0, wxALL, FromDIP(10));
     sizer->Add(audioListPanel, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, FromDIP(5));
-    sizer->Add(recordBtn, 0, wxEXPAND | wxALL, FromDIP(10));
+    sizer->Add(recordBtn, 0, wxALIGN_CENTER | wxALL, FromDIP(10));
     
     panel->SetSizer(sizer);
     return panel;
