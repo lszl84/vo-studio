@@ -67,7 +67,10 @@ Frame::Frame(wxDocManager* manager, wxFrame* frame, wxWindowID id, const wxStrin
     SetMinSize({FromDIP(600), FromDIP(400)});
     
     BuildMenuBar();
-    BuildToolbar();
+    // BuildToolbar();  // Disable toolbar for now - causing GTK issues
+    
+    // Create status bar early to avoid null pointer issues
+    CreateStatusBar();
     
     // Timer for UI updates
     timer = new wxTimer(this);

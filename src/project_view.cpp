@@ -30,10 +30,14 @@ void ProjectView::OnDraw(wxDC* dc)
 
 void ProjectView::OnChangeFilename()
 {
+    wxWindow* frame = GetFrame();
+    if (!frame)
+        return;
+    
     wxString appName = wxTheApp->GetAppDisplayName();
     wxString docName = GetDocument()->GetUserReadableName();
     wxString title = docName + (GetDocument()->IsModified() ? " - Edited" : "") + wxString(_(" - ")) + appName;
-    GetFrame()->SetLabel(title);
+    frame->SetLabel(title);
 }
 
 ProjectDocument* ProjectView::GetDocument() const
