@@ -55,8 +55,7 @@ Frame::Frame(wxWindow* parent, wxWindowID id, const wxString& title,
     SetSizer(frameSizer);
 
     BuildMenuBar();
-    CreateStatusBar(2);
-    SetStatusWidths(2, (const int[]){-1, -3});
+    CreateStatusBar();
 
     timer = new wxTimer(this);
     timer->Start(100);
@@ -122,7 +121,7 @@ void Frame::ShowEditor()
         centerPanel->SetSizer(centerSizer);
 
         splitter->SplitVertically(leftPanel, centerPanel);
-        splitter->SetSashPosition(FromDIP(280));
+        splitter->SetSashPosition(FromDIP(380));
         GetSizer()->Add(splitter, 1, wxEXPAND);
     }
 
@@ -157,10 +156,10 @@ wxPanel* Frame::CreateLeftPanel()
 {
     wxPanel* panel = new wxPanel(splitter, wxID_ANY);
 
-    wxStaticText* title = new wxStaticText(panel, wxID_ANY, "Recorded Clips");
-    wxFont boldFont = title->GetFont();
+    workspaceLabel = new wxStaticText(panel, wxID_ANY, wxEmptyString);
+    wxFont boldFont = workspaceLabel->GetFont();
     boldFont.SetWeight(wxFONTWEIGHT_BOLD);
-    title->SetFont(boldFont);
+    workspaceLabel->SetFont(boldFont);
 
     audioListPanel = new AudioListPanel(panel);
 
@@ -168,7 +167,7 @@ wxPanel* Frame::CreateLeftPanel()
                              wxDefaultPosition, wxSize(FromDIP(120), FromDIP(35)));
 
     wxBoxSizer* sizer = new wxBoxSizer(wxVERTICAL);
-    sizer->Add(title, 0, wxALL, FromDIP(10));
+    sizer->Add(workspaceLabel, 0, wxALL, FromDIP(10));
     sizer->Add(audioListPanel, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, FromDIP(5));
     sizer->Add(recordBtn, 0, wxALIGN_CENTER | wxALL, FromDIP(10));
 
@@ -213,12 +212,14 @@ void Frame::UpdateTitle()
     {
         wxString dirName = wxString(workspace->GetDirectory().filename().string());
         SetTitle(dirName + " - " + appName);
-        SetStatusText(wxString(workspace->GetDirectory().string()), 1);
+        if (workspaceLabel)
+            workspaceLabel->SetLabel(wxString(workspace->GetDirectory().string()));
     }
     else
     {
         SetTitle(appName);
-        SetStatusText(wxEmptyString, 1);
+        if (workspaceLabel)
+            workspaceLabel->SetLabel(wxEmptyString);
     }
 }
 

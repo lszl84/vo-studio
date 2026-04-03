@@ -66,6 +66,7 @@ private:
     AudioListPanel* audioListPanel = nullptr;
     wxPanel* centerPanel = nullptr;
     wxButton* recordBtn = nullptr;
+    wxStaticText* workspaceLabel = nullptr;
 
     Workspace* workspace = nullptr;
     AudioEngine* audioEngine = nullptr;

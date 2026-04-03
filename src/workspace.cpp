@@ -1,9 +1,12 @@
 #include "workspace.h"
+#include <nlohmann/json.hpp>
 #include <algorithm>
 #include <fstream>
 #include <sstream>
 #include <iomanip>
 #include <regex>
+
+using json = nlohmann::json;
 
 bool Workspace::Create(const fs::path& dir)
 {
@@ -113,40 +116,36 @@ void Workspace::ImportScript(const wxString& srcPath)
 
 void Workspace::LoadMetadata()
 {
-    fs::path metaPath = dir_ / ".vostudio";
+    fs::path metaPath = dir_ / "project.json";
     if (!fs::exists(metaPath))
         return;
 
-    std::ifstream file(metaPath);
-    std::string line;
-
-    while (std::getline(file, line))
+    try
     {
-        if (line.substr(0, 10) == "TEXT_SIZE: ")
+        std::ifstream file(metaPath);
+        json j = json::parse(file);
+
+        if (j.contains("textSize"))
+            textSize_ = j["textSize"].get<int>();
+
+        if (j.contains("clips") && j["clips"].is_object())
         {
-            textSize_ = std::stoi(line.substr(10));
-        }
-        else if (line.substr(0, 6) == "CLIP: ")
-        {
-            std::istringstream iss(line.substr(6));
-            std::string clipName;
-            double duration, lufs, peakDb;
-            if (iss >> clipName >> duration >> lufs >> peakDb)
+            for (auto& clip : clips_)
             {
-                for (auto& clip : clips_)
+                std::string name = clip.filename.ToStdString();
+                if (j["clips"].contains(name))
                 {
-                    if (clip.filename == wxString(clipName))
-                    {
-                        clip.duration = duration;
-                        clip.lufs = lufs;
-                        clip.peakDb = peakDb;
-                        clip.analyzed = true;
-                        break;
-                    }
+                    auto& c = j["clips"][name];
+                    if (c.contains("duration"))  clip.duration = c["duration"].get<double>();
+                    if (c.contains("lufs"))      clip.lufs = c["lufs"].get<double>();
+                    if (c.contains("peakDb"))    clip.peakDb = c["peakDb"].get<double>();
+                    if (c.contains("active"))    clip.active = c["active"].get<bool>();
+                    clip.analyzed = c.contains("duration");
                 }
             }
         }
     }
+    catch (const json::exception&) {}
 }
 
 void Workspace::SaveMetadata()
@@ -154,21 +153,27 @@ void Workspace::SaveMetadata()
     if (dir_.empty())
         return;
 
-    fs::path metaPath = dir_ / ".vostudio";
-    std::ofstream file(metaPath);
+    json j;
+    j["textSize"] = textSize_;
 
-    file << "TEXT_SIZE: " << textSize_ << "\n";
+    json clips = json::object();
     for (const auto& clip : clips_)
     {
+        json c;
+        c["active"] = clip.active;
         if (clip.analyzed)
         {
-            file << "CLIP: " << clip.filename.ToStdString()
-                 << std::fixed << std::setprecision(6)
-                 << " " << clip.duration
-                 << " " << clip.lufs
-                 << " " << clip.peakDb << "\n";
+            c["duration"] = clip.duration;
+            c["lufs"] = clip.lufs;
+            c["peakDb"] = clip.peakDb;
         }
+        clips[clip.filename.ToStdString()] = c;
     }
+    j["clips"] = clips;
+
+    fs::path metaPath = dir_ / "project.json";
+    std::ofstream file(metaPath);
+    file << j.dump(2) << "\n";
 }
 
 wxString Workspace::GetNextClipPath()
@@ -176,7 +181,6 @@ wxString Workspace::GetNextClipPath()
     int maxNum = 0;
     std::regex pattern("^(\\d{3})\\.wav$");
 
-    // Scan directory directly for the most accurate count
     for (const auto& entry : fs::directory_iterator(dir_))
     {
         std::string name = entry.path().filename().string();
@@ -199,6 +203,15 @@ wxString Workspace::GetNextClipPath()
 wxString Workspace::GetClipFullPath(const wxString& clipName) const
 {
     return wxString((dir_ / clipName.ToStdString()).string());
+}
+
+void Workspace::ToggleClipActive(size_t index)
+{
+    if (index < clips_.size())
+    {
+        clips_[index].active = !clips_[index].active;
+        SaveMetadata();
+    }
 }
 
 void Workspace::UpdateClipAnalysis(size_t index, double lufs, double peakDb, double duration)

@@ -30,6 +30,13 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(miniaudio)
 
+# nlohmann/json for project metadata
+FetchContent_Declare(
+    json
+    URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+)
+FetchContent_MakeAvailable(json)
+
 set(SRCS
     src/main.cpp
     src/app.cpp
@@ -63,9 +70,10 @@ target_include_directories(vo_studio PRIVATE
     ${miniaudio_SOURCE_DIR}
 )
 
-target_link_libraries(vo_studio PRIVATE 
-    wxcore 
+target_link_libraries(vo_studio PRIVATE
+    wxcore
     wxnet
+    nlohmann_json::nlohmann_json
     ${LIBAV_LIBRARIES}
 )
 

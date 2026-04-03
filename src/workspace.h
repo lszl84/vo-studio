@@ -13,6 +13,7 @@ struct AudioClip
     double lufs = 0.0;
     double peakDb = -96.0;
     bool analyzed = false;
+    bool active = true;
 };
 
 class Workspace
@@ -35,6 +36,7 @@ public:
     wxString GetClipFullPath(const wxString& clipName) const;
     void ScanClips();
     void UpdateClipAnalysis(size_t index, double lufs, double peakDb, double duration);
+    void ToggleClipActive(size_t index);
     void RemoveClip(size_t index);
 
     // Settings

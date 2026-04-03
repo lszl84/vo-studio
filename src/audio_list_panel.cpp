@@ -9,6 +9,7 @@ wxBEGIN_EVENT_TABLE(AudioListPanel, wxPanel)
     EVT_CONTEXT_MENU(AudioListPanel::OnContextMenu)
     EVT_MENU(ID_DELETE_CLIP, AudioListPanel::OnDeleteClip)
     EVT_MENU(ID_PLAY_CLIP, AudioListPanel::OnPlayClip)
+    EVT_LIST_KEY_DOWN(wxID_ANY, AudioListPanel::OnKeyDown)
 wxEND_EVENT_TABLE()
 
 AudioListPanel::AudioListPanel(wxWindow* parent)
@@ -26,7 +27,7 @@ AudioListPanel::AudioListPanel(wxWindow* parent)
 
 void AudioListPanel::SetupColumns()
 {
-    listCtrl->AppendColumn("Clip", wxLIST_FORMAT_LEFT, 80);
+    listCtrl->AppendColumn("Clip", wxLIST_FORMAT_LEFT, 130);
     listCtrl->AppendColumn("Duration", wxLIST_FORMAT_CENTER, 70);
     listCtrl->AppendColumn("LUFS", wxLIST_FORMAT_CENTER, 60);
     listCtrl->AppendColumn("Peak", wxLIST_FORMAT_CENTER, 60);
@@ -49,7 +50,8 @@ void AudioListPanel::RefreshList()
     for (size_t i = 0; i < clips.size(); ++i)
     {
         const auto& clip = clips[i];
-        long index = listCtrl->InsertItem(static_cast<long>(i), clip.filename);
+        wxString label = clip.active ? clip.filename : clip.filename + "  [skip]";
+        long index = listCtrl->InsertItem(static_cast<long>(i), label);
 
         if (clip.analyzed)
         {
@@ -63,6 +65,9 @@ void AudioListPanel::RefreshList()
             listCtrl->SetItem(index, 2, "--");
             listCtrl->SetItem(index, 3, "--");
         }
+
+        if (!clip.active)
+            listCtrl->SetItemTextColour(index, wxColour(140, 140, 140));
     }
 }
 
@@ -127,6 +132,24 @@ void AudioListPanel::OnContextMenu(wxContextMenuEvent& event)
     menu.Append(ID_DELETE_CLIP, "&Delete");
 
     PopupMenu(&menu);
+}
+
+void AudioListPanel::OnKeyDown(wxListEvent& event)
+{
+    if (event.GetKeyCode() == 'D' || event.GetKeyCode() == 'd')
+    {
+        int index = GetSelectedIndex();
+        if (index >= 0 && workspace)
+        {
+            workspace->ToggleClipActive(static_cast<size_t>(index));
+            RefreshList();
+            SelectItem(index);
+        }
+    }
+    else
+    {
+        event.Skip();
+    }
 }
 
 void AudioListPanel::OnDeleteClip(wxCommandEvent& event)

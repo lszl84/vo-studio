@@ -24,6 +24,7 @@ private:
     void OnContextMenu(wxContextMenuEvent& event);
     void OnDeleteClip(wxCommandEvent& event);
     void OnPlayClip(wxCommandEvent& event);
+    void OnKeyDown(wxListEvent& event);
 
     void SetupColumns();
     wxString FormatDuration(double seconds) const;
