@@ -1,10 +1,10 @@
 #pragma once
 
-#include <wx/wx.h>
 #include <string>
 #include <vector>
 #include <atomic>
 #include <thread>
+#include <cstdint>
 
 // Forward declarations for miniaudio
 struct ma_context;
@@ -52,6 +52,8 @@ private:
     std::vector<float> playbackBuffer;
     std::atomic<size_t> playbackPosition{0};
     float playbackDuration = 0.0f;
+    uint32_t nativeChannels = 2;
+    uint32_t nativeSampleRate = 48000;
     
     std::string currentRecordPath;
     std::string currentPlaybackPath;

@@ -14,6 +14,8 @@
 #include <wx/msgdlg.h>
 #include <wx/thread.h>
 #include <filesystem>
+#include <fstream>
+#include <chrono>
 namespace fs = std::filesystem;
 
 wxBEGIN_EVENT_TABLE(Frame, wxDocParentFrame)
@@ -30,6 +32,7 @@ wxBEGIN_EVENT_TABLE(Frame, wxDocParentFrame)
     EVT_UPDATE_UI(ID_STOP, Frame::OnUpdateStop)
     EVT_UPDATE_UI(ID_PLAY, Frame::OnUpdatePlay)
     EVT_TIMER(wxID_ANY, Frame::OnTimer)
+    EVT_THREAD(ID_ANALYSIS_COMPLETE, Frame::OnAnalysisComplete)
 wxEND_EVENT_TABLE()
 
 Frame::Frame(wxDocManager* manager, wxFrame* frame, wxWindowID id, const wxString& title,
@@ -393,11 +396,23 @@ void Frame::AnalysisThreadFunc()
     if (!currentDoc)
         return;
     
+    // Wait a bit for file to be fully written
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    
     for (size_t i = 0; i < currentDoc->audioClips.size() && analysisRunning.load(); ++i)
     {
         auto& clip = currentDoc->audioClips[i];
         if (!clip.analyzed)
         {
+            // Check if file exists and has content
+            std::ifstream file(clip.filename.ToStdString(), std::ios::binary);
+            if (!file.good())
+                continue;
+            file.seekg(0, std::ios::end);
+            if (file.tellg() < 100)  // At least 100 bytes (WAV header is ~44 bytes)
+                continue;
+            file.close();
+            
             LufsAnalysis analysis = AnalyzeLufs(clip.filename.ToStdString());
             if (analysis.valid && analysisRunning.load())
             {

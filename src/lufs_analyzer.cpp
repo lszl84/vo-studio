@@ -3,7 +3,6 @@
 extern "C" {
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
-#include <libswresample/swresample.h>
 #include <libavutil/opt.h>
 #include <libavutil/channel_layout.h>
 }
@@ -13,29 +12,8 @@ extern "C" {
 #include <algorithm>
 
 // EBU R128 constants
-static const double LUFS_GATE = -70.0;    // Absolute gate
-static const double LUFS_REL_GATE = -10.0; // Relative gate offset
-static const int BLOCK_SIZE_400MS = 19200;   // 400ms at 48kHz
-static const int BLOCK_SIZE_3S = 144000;     // 3s at 48kHz
-
-// Convert sample to LUFS (simplified - assumes 0 dBFS = 1.0)
-static double SampleToLufs(double sample)
-{
-    if (sample == 0.0) return -HUGE_VAL;
-    return 20.0 * std::log10(std::abs(sample));
-}
-
-// Calculate mean square of a block
-static double CalculateMeanSquare(const std::vector<double>& samples, size_t start, size_t count)
-{
-    double sum = 0.0;
-    size_t end = std::min(start + count, samples.size());
-    for (size_t i = start; i < end; ++i)
-    {
-        sum += samples[i] * samples[i];
-    }
-    return sum / count;
-}
+static const double LUFS_GATE = -70.0;
+static const double LUFS_REL_GATE = -10.0;
 
 LufsAnalysis AnalyzeLufs(const std::string& filepath)
 {
@@ -43,9 +21,7 @@ LufsAnalysis AnalyzeLufs(const std::string& filepath)
     
     AVFormatContext* fmt_ctx = nullptr;
     if (avformat_open_input(&fmt_ctx, filepath.c_str(), nullptr, nullptr) < 0)
-    {
         return result;
-    }
     
     if (avformat_find_stream_info(fmt_ctx, nullptr) < 0)
     {
@@ -88,31 +64,15 @@ LufsAnalysis AnalyzeLufs(const std::string& filepath)
         return result;
     }
     
-    // Set up resampler to convert to float planar stereo at 48kHz
-    SwrContext* swr_ctx = nullptr;
-    int target_rate = 48000;
-    AVChannelLayout target_layout;
-    av_channel_layout_default(&target_layout, 2); // Stereo
-    
-    int ret = swr_alloc_set_opts2(&swr_ctx,
-                                  &target_layout, AV_SAMPLE_FMT_FLTP, target_rate,
-                                  &dec_ctx->ch_layout, dec_ctx->sample_fmt, dec_ctx->sample_rate,
-                                  0, nullptr);
-    if (ret < 0 || swr_init(swr_ctx) < 0)
-    {
-        if (swr_ctx) swr_free(&swr_ctx);
-        avcodec_free_context(&dec_ctx);
-        avformat_close_input(&fmt_ctx);
-        return result;
-    }
-    
-    // Read and decode audio
+    // Read and decode audio directly (no resampling - handle formats natively)
     std::vector<double> samples;
+    samples.reserve(48000 * 10); // Reserve 10 seconds at 48kHz
+    
     AVPacket* packet = av_packet_alloc();
     AVFrame* frame = av_frame_alloc();
-    AVFrame* resampled = av_frame_alloc();
     
     double maxSample = 0.0;
+    int ret;
     
     while (av_read_frame(fmt_ctx, packet) >= 0)
     {
@@ -130,29 +90,94 @@ LufsAnalysis AnalyzeLufs(const std::string& filepath)
             ret = avcodec_receive_frame(dec_ctx, frame);
             if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
                 break;
+            if (ret < 0)
+                goto cleanup;
             
-            // Resample
-            int out_samples = swr_get_out_samples(swr_ctx, frame->nb_samples);
-            av_frame_make_writable(resampled);
-            ret = swr_convert(swr_ctx, nullptr, 0,
-                              const_cast<const uint8_t**>(frame->data), frame->nb_samples);
+            // Process samples based on format
+            int numChannels = dec_ctx->ch_layout.nb_channels;
             
-            uint8_t* output[2] = { nullptr, nullptr };
-            ret = swr_convert(swr_ctx, output, out_samples,
-                              nullptr, 0);
-            
-            // Process samples
-            for (int i = 0; i < frame->nb_samples; i++)
+            if (dec_ctx->sample_fmt == AV_SAMPLE_FMT_FLT || 
+                dec_ctx->sample_fmt == AV_SAMPLE_FMT_FLTP)
             {
-                // Average channels to get mono
-                float left = reinterpret_cast<float*>(frame->data[0])[i];
-                float right = (dec_ctx->ch_layout.nb_channels > 1) 
-                    ? reinterpret_cast<float*>(frame->extended_data[1])[i] 
-                    : left;
-                float mono = (left + right) * 0.5f;
-                
-                samples.push_back(mono);
-                maxSample = std::max(maxSample, static_cast<double>(std::abs(mono)));
+                // Float format
+                for (int i = 0; i < frame->nb_samples; i++)
+                {
+                    float sample = 0.0f;
+                    if (dec_ctx->sample_fmt == AV_SAMPLE_FMT_FLT)
+                    {
+                        // Interleaved
+                        const float* data = reinterpret_cast<const float*>(frame->data[0]);
+                        for (int ch = 0; ch < numChannels; ch++)
+                            sample += data[i * numChannels + ch];
+                        sample /= numChannels;
+                    }
+                    else
+                    {
+                        // Planar - average channels
+                        for (int ch = 0; ch < numChannels && ch < 2; ch++)
+                        {
+                            if (frame->data[ch])
+                                sample += reinterpret_cast<const float*>(frame->data[ch])[i];
+                        }
+                        sample /= std::max(1, std::min(numChannels, 2));
+                    }
+                    samples.push_back(sample);
+                    maxSample = std::max(maxSample, static_cast<double>(std::abs(sample)));
+                }
+            }
+            else if (dec_ctx->sample_fmt == AV_SAMPLE_FMT_S16 ||
+                     dec_ctx->sample_fmt == AV_SAMPLE_FMT_S16P)
+            {
+                // 16-bit signed int
+                for (int i = 0; i < frame->nb_samples; i++)
+                {
+                    float sample = 0.0f;
+                    if (dec_ctx->sample_fmt == AV_SAMPLE_FMT_S16)
+                    {
+                        const int16_t* data = reinterpret_cast<const int16_t*>(frame->data[0]);
+                        for (int ch = 0; ch < numChannels; ch++)
+                            sample += data[i * numChannels + ch] / 32768.0f;
+                        sample /= numChannels;
+                    }
+                    else
+                    {
+                        for (int ch = 0; ch < numChannels && ch < 2; ch++)
+                        {
+                            if (frame->data[ch])
+                                sample += reinterpret_cast<const int16_t*>(frame->data[ch])[i] / 32768.0f;
+                        }
+                        sample /= std::max(1, std::min(numChannels, 2));
+                    }
+                    samples.push_back(sample);
+                    maxSample = std::max(maxSample, static_cast<double>(std::abs(sample)));
+                }
+            }
+            else if (dec_ctx->sample_fmt == AV_SAMPLE_FMT_S32 ||
+                     dec_ctx->sample_fmt == AV_SAMPLE_FMT_S32P)
+            {
+                // 32-bit signed int
+                for (int i = 0; i < frame->nb_samples; i++)
+                {
+                    float sample = 0.0f;
+                    if (dec_ctx->sample_fmt == AV_SAMPLE_FMT_S32)
+                    {
+                        const int32_t* data = reinterpret_cast<const int32_t*>(frame->data[0]);
+                        for (int ch = 0; ch < numChannels; ch++)
+                            sample += data[i * numChannels + ch] / 2147483648.0f;
+                        sample /= numChannels;
+                    }
+                    else
+                    {
+                        for (int ch = 0; ch < numChannels && ch < 2; ch++)
+                        {
+                            if (frame->data[ch])
+                                sample += reinterpret_cast<const int32_t*>(frame->data[ch])[i] / 2147483648.0f;
+                        }
+                        sample /= std::max(1, std::min(numChannels, 2));
+                    }
+                    samples.push_back(sample);
+                    maxSample = std::max(maxSample, static_cast<double>(std::abs(sample)));
+                }
             }
         }
         ret = 0;
@@ -168,108 +193,118 @@ LufsAnalysis AnalyzeLufs(const std::string& filepath)
         if (ret < 0)
             break;
         
-        for (int i = 0; i < frame->nb_samples; i++)
+        int numChannels = dec_ctx->ch_layout.nb_channels;
+        
+        // Handle remaining frames (simplified - just process float for now)
+        if (dec_ctx->sample_fmt == AV_SAMPLE_FMT_FLT)
         {
-            float left = reinterpret_cast<float*>(frame->data[0])[i];
-            float right = (dec_ctx->ch_layout.nb_channels > 1) 
-                ? reinterpret_cast<float*>(frame->extended_data[1])[i] 
-                : left;
-            float mono = (left + right) * 0.5f;
-            samples.push_back(mono);
-            maxSample = std::max(maxSample, static_cast<double>(std::abs(mono)));
+            for (int i = 0; i < frame->nb_samples; i++)
+            {
+                const float* data = reinterpret_cast<const float*>(frame->data[0]);
+                float sample = 0.0f;
+                for (int ch = 0; ch < numChannels; ch++)
+                    sample += data[i * numChannels + ch];
+                sample /= numChannels;
+                samples.push_back(sample);
+                maxSample = std::max(maxSample, static_cast<double>(std::abs(sample)));
+            }
         }
     }
     
+cleanup:
     // Calculate peak
     if (maxSample > 0)
-    {
         result.peakDb = 20.0 * std::log10(maxSample);
-    }
+    else
+        result.peakDb = -96.0;
     
     // Calculate duration
-    result.duration = static_cast<double>(samples.size()) / target_rate;
+    result.duration = static_cast<double>(samples.size()) / 48000.0;
     
-    // Calculate momentary loudness (400ms blocks)
-    std::vector<double> momentaryBlocks;
-    for (size_t i = 0; i + BLOCK_SIZE_400MS <= samples.size(); i += BLOCK_SIZE_400MS / 4) // 75% overlap
+    // Calculate LUFS using simplified method
+    if (!samples.empty())
     {
-        double ms = CalculateMeanSquare(samples, i, BLOCK_SIZE_400MS);
-        if (ms > 0)
-        {
-            double lufs = -0.691 + 10.0 * std::log10(ms);
-            momentaryBlocks.push_back(lufs);
-        }
-    }
-    
-    // Calculate integrated loudness with gating
-    if (!momentaryBlocks.empty())
-    {
-        // Absolute gate
-        std::vector<double> gated;
-        for (double l : momentaryBlocks)
-        {
-            if (l > LUFS_GATE)
-                gated.push_back(l);
-        }
+        // Block size for 400ms at 48kHz
+        const size_t blockSize = 19200;
+        const size_t overlap = blockSize / 4;  // 75% overlap
         
-        if (!gated.empty())
+        std::vector<double> blockLoudness;
+        
+        for (size_t i = 0; i + blockSize <= samples.size(); i += overlap)
         {
-            // Calculate mean of gated blocks
             double sum = 0.0;
-            for (double l : gated) sum += std::pow(10.0, l / 10.0);
-            double meanPow = sum / gated.size();
-            double integrated = 10.0 * std::log10(meanPow);
+            for (size_t j = i; j < i + blockSize && j < samples.size(); j++)
+                sum += samples[j] * samples[j];
             
-            // Relative gate
-            double relativeGate = integrated + LUFS_REL_GATE;
-            std::vector<double> relGated;
-            for (double l : gated)
+            double meanSquare = sum / blockSize;
+            if (meanSquare > 0)
             {
-                if (l > relativeGate)
-                    relGated.push_back(l);
-            }
-            
-            if (!relGated.empty())
-            {
-                sum = 0.0;
-                for (double l : relGated) sum += std::pow(10.0, l / 10.0);
-                meanPow = sum / relGated.size();
-                result.integratedLufs = 10.0 * std::log10(meanPow);
-            }
-            else
-            {
-                result.integratedLufs = integrated;
+                // EBU R128 formula: -0.691 + 10*log10(mean square)
+                double lufs = -0.691 + 10.0 * std::log10(meanSquare);
+                blockLoudness.push_back(lufs);
             }
         }
         
-        // Momentary (max of 400ms blocks)
-        result.momentaryLufs = *std::max_element(momentaryBlocks.begin(), momentaryBlocks.end());
-        
-        // Short-term (3s sliding window)
-        std::vector<double> shortTermBlocks;
-        for (size_t i = 0; i + BLOCK_SIZE_3S <= samples.size(); i += BLOCK_SIZE_3S / 2)
+        if (!blockLoudness.empty())
         {
-            double ms = CalculateMeanSquare(samples, i, BLOCK_SIZE_3S);
-            if (ms > 0)
+            // Absolute gate at -70 LUFS
+            std::vector<double> gated;
+            for (double l : blockLoudness)
+                if (l > LUFS_GATE)
+                    gated.push_back(l);
+            
+            if (!gated.empty())
             {
-                double lufs = -0.691 + 10.0 * std::log10(ms);
-                shortTermBlocks.push_back(lufs);
+                // Calculate integrated loudness
+                double sumPow = 0.0;
+                for (double l : gated)
+                    sumPow += std::pow(10.0, l / 10.0);
+                double integrated = 10.0 * std::log10(sumPow / gated.size());
+                
+                // Relative gate
+                double relGate = integrated + LUFS_REL_GATE;
+                std::vector<double> relGated;
+                for (double l : gated)
+                    if (l > relGate)
+                        relGated.push_back(l);
+                
+                if (!relGated.empty())
+                {
+                    sumPow = 0.0;
+                    for (double l : relGated)
+                        sumPow += std::pow(10.0, l / 10.0);
+                    result.integratedLufs = 10.0 * std::log10(sumPow / relGated.size());
+                }
+                else
+                {
+                    result.integratedLufs = integrated;
+                }
+                
+                result.momentaryLufs = *std::max_element(blockLoudness.begin(), blockLoudness.end());
+                
+                // Short-term (3s)
+                const size_t shortBlockSize = 144000;
+                std::vector<double> shortBlocks;
+                for (size_t i = 0; i + shortBlockSize <= samples.size(); i += shortBlockSize / 2)
+                {
+                    double sum = 0.0;
+                    for (size_t j = i; j < i + shortBlockSize && j < samples.size(); j++)
+                        sum += samples[j] * samples[j];
+                    double ms = sum / shortBlockSize;
+                    if (ms > 0)
+                        shortBlocks.push_back(-0.691 + 10.0 * std::log10(ms));
+                }
+                if (!shortBlocks.empty())
+                    result.shortTermLufs = *std::max_element(shortBlocks.begin(), shortBlocks.end());
             }
-        }
-        
-        if (!shortTermBlocks.empty())
-        {
-            result.shortTermLufs = *std::max_element(shortTermBlocks.begin(), shortTermBlocks.end());
         }
     }
     
     result.valid = true;
     
     // Cleanup
-    av_frame_free(&resampled);
     av_frame_free(&frame);
     av_packet_free(&packet);
-    swr_free(&swr_ctx);
     avcodec_free_context(&dec_ctx);
     avformat_close_input(&fmt_ctx);
     

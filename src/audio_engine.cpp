@@ -2,6 +2,8 @@
 
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
+#include <algorithm>
+#include <cstring>
 
 AudioEngine::AudioEngine()
 {
@@ -52,7 +54,7 @@ bool AudioEngine::StartRecording(const std::string& filepath)
     
     currentRecordPath = filepath;
     
-    // Initialize encoder
+    // Initialize encoder - mono, 48kHz, float
     encoder = new ma_encoder();
     ma_encoder_config config = ma_encoder_config_init(ma_encoding_format_wav, ma_format_f32, 1, 48000);
     
@@ -121,35 +123,35 @@ bool AudioEngine::StartPlayback(const std::string& filepath)
     StopPlayback();
     currentPlaybackPath = filepath;
     
-    // Load audio file using miniaudio decoder
+    // Load audio file using miniaudio decoder - get native format
     ma_decoder decoder;
-    ma_decoder_config config = ma_decoder_config_init(ma_format_f32, 2, 48000);
-    
-    ma_result result = ma_decoder_init_file(filepath.c_str(), &config, &decoder);
+    ma_result result = ma_decoder_init_file(filepath.c_str(), nullptr, &decoder);
     if (result != MA_SUCCESS)
-    {
         return false;
-    }
     
-    // Get duration
+    // Get file info
     ma_uint64 lengthInFrames;
     ma_decoder_get_length_in_pcm_frames(&decoder, &lengthInFrames);
-    playbackDuration = static_cast<float>(lengthInFrames) / 48000.0f;
     
-    // Decode entire file
-    playbackBuffer.resize(lengthInFrames * 2);
+    // Store original format info
+    nativeChannels = decoder.outputChannels;
+    nativeSampleRate = decoder.outputSampleRate;
+    playbackDuration = static_cast<float>(lengthInFrames) / static_cast<float>(nativeSampleRate);
+    
+    // Decode entire file at native format
+    playbackBuffer.resize(lengthInFrames * nativeChannels);
     ma_uint64 framesRead;
     ma_decoder_read_pcm_frames(&decoder, playbackBuffer.data(), lengthInFrames, &framesRead);
     ma_decoder_uninit(&decoder);
     
     playbackPosition.store(0);
     
-    // Initialize playback device
+    // Initialize playback device at native sample rate
     playbackDevice = new ma_device();
     ma_device_config deviceConfig = ma_device_config_init(ma_device_type_playback);
     deviceConfig.playback.format = ma_format_f32;
-    deviceConfig.playback.channels = 2;
-    deviceConfig.sampleRate = 48000;
+    deviceConfig.playback.channels = nativeChannels;
+    deviceConfig.sampleRate = nativeSampleRate;
     deviceConfig.dataCallback = PlaybackCallback;
     deviceConfig.pUserData = this;
     
@@ -189,11 +191,11 @@ void AudioEngine::StopPlayback()
 
 float AudioEngine::GetPlaybackPosition() const
 {
-    if (!playing.load() || playbackBuffer.empty())
+    if (!playing.load() || playbackBuffer.empty() || nativeSampleRate == 0)
         return 0.0f;
     
     size_t pos = playbackPosition.load();
-    return static_cast<float>(pos / 2) / 48000.0f;
+    return static_cast<float>(pos / nativeChannels) / static_cast<float>(nativeSampleRate);
 }
 
 float AudioEngine::GetPlaybackDuration() const
@@ -220,22 +222,44 @@ void AudioEngine::PlaybackCallback(ma_device* device, void* output, const void* 
     AudioEngine* engine = static_cast<AudioEngine*>(device->pUserData);
     if (!engine || !engine->playing.load())
     {
-        std::fill(static_cast<float*>(output), static_cast<float*>(output) + frameCount * 2, 0.0f);
+        std::fill(static_cast<float*>(output), static_cast<float*>(output) + frameCount * device->playback.channels, 0.0f);
         return;
     }
     
     size_t pos = engine->playbackPosition.load();
-    size_t framesAvailable = (engine->playbackBuffer.size() - pos) / 2;
-    size_t framesToCopy = std::min(static_cast<size_t>(frameCount), framesAvailable);
+    size_t samplesAvailable = engine->playbackBuffer.size() - pos;
+    size_t samplesToCopy = std::min(static_cast<size_t>(frameCount * device->playback.channels), samplesAvailable);
+    size_t framesToCopy = samplesToCopy / device->playback.channels;
     
     float* outputFloat = static_cast<float*>(output);
-    std::memcpy(outputFloat, engine->playbackBuffer.data() + pos, framesToCopy * 2 * sizeof(float));
+    
+    if (engine->nativeChannels == device->playback.channels)
+    {
+        // Direct copy
+        std::memcpy(outputFloat, engine->playbackBuffer.data() + pos, samplesToCopy * sizeof(float));
+    }
+    else if (engine->nativeChannels == 1 && device->playback.channels == 2)
+    {
+        // Mono to stereo - duplicate samples
+        for (size_t i = 0; i < framesToCopy; i++)
+        {
+            float sample = engine->playbackBuffer[pos + i];
+            outputFloat[i * 2] = sample;
+            outputFloat[i * 2 + 1] = sample;
+        }
+    }
+    else
+    {
+        // Other conversions - just copy what we can
+        std::memcpy(outputFloat, engine->playbackBuffer.data() + pos, samplesToCopy * sizeof(float));
+    }
     
     if (framesToCopy < frameCount)
     {
-        std::fill(outputFloat + framesToCopy * 2, outputFloat + frameCount * 2, 0.0f);
+        std::fill(outputFloat + framesToCopy * device->playback.channels, 
+                  outputFloat + frameCount * device->playback.channels, 0.0f);
         engine->playing.store(false);
     }
     
-    engine->playbackPosition.fetch_add(framesToCopy * 2);
+    engine->playbackPosition.fetch_add(samplesToCopy);
 }
