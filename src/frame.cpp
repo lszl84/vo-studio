@@ -321,6 +321,9 @@ void Frame::OnImportScript(wxCommandEvent& event)
 
 void Frame::OnTextSizeIncrease(wxCommandEvent& event)
 {
+    if (!textPanel)
+        return;
+
     int size = textPanel->GetTextSize();
     textPanel->SetTextSize(size + 2);
     if (workspace)
@@ -329,6 +332,9 @@ void Frame::OnTextSizeIncrease(wxCommandEvent& event)
 
 void Frame::OnTextSizeDecrease(wxCommandEvent& event)
 {
+    if (!textPanel)
+        return;
+
     int size = textPanel->GetTextSize();
     if (size > 8)
     {
@@ -428,7 +434,7 @@ void Frame::OnStop(wxCommandEvent& event)
 
 void Frame::OnPlay(wxCommandEvent& event)
 {
-    if (!workspace || audioEngine->IsRecording() || audioEngine->IsPlaying())
+    if (!workspace || !audioListPanel || audioEngine->IsRecording() || audioEngine->IsPlaying())
         return;
 
     int idx = audioListPanel->GetSelectedIndex();
@@ -454,7 +460,7 @@ void Frame::OnUpdateStop(wxUpdateUIEvent& event)
 void Frame::OnUpdatePlay(wxUpdateUIEvent& event)
 {
     event.Enable(!audioEngine->IsRecording() && !audioEngine->IsPlaying() &&
-                 audioListPanel->GetSelectedIndex() >= 0);
+                 audioListPanel && audioListPanel->GetSelectedIndex() >= 0);
 }
 
 void Frame::OnTimer(wxTimerEvent& event)
