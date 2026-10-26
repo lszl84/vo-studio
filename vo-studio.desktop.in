@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=VO Studio
+GenericName=Voice-Over Recorder
+Comment=Record voice-over clips against a script
+Exec=@CMAKE_INSTALL_FULL_BINDIR@/vo_studio
+Terminal=false
+Type=Application
+Icon=vo-studio
+Categories=AudioVideo;Audio;Recorder;
+Keywords=voice;voiceover;record;microphone;audio;
+StartupWMClass=vo_studio

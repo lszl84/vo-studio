@@ -22,17 +22,20 @@ A professional voice-over recording application built with wxWidgets and FFmpeg/
 
 - CMake 3.14+
 - C++20 compiler
-- wxWidgets (fetched automatically via CMake FetchContent)
+- wxWidgets 3.2+ (system package, e.g. ~libwxgtk3.2-dev~ on Debian)
 - FFmpeg/libav libraries (libavformat, libavcodec, libswresample, libavutil)
 - pkg-config
 
 *** Linux
 
 #+begin_src bash
-mkdir build && cd build
-cmake ..
-cmake --build . -j$(nproc)
+sudo apt install libwxgtk3.2-dev libavformat-dev libavcodec-dev libswresample-dev libavutil-dev
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=$HOME/.local
+cmake --build build -j$(nproc)
+cmake --install build
 #+end_src
+
+Installing puts ~vo_studio~ in ~bin/~, plus a desktop entry and icon so it shows up in the application menu.
 
 *** macOS
 

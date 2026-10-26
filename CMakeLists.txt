@@ -3,20 +3,14 @@ cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
 project(vo_studio LANGUAGES CXX)
 
 include(FetchContent)
+include(GNUInstallDirs)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-set(wxBUILD_SHARED OFF)
-
-message(STATUS "Fetching wxWidgets...")
-
-FetchContent_Declare(
-   wxWidgets
-   GIT_REPOSITORY https://github.com/wxWidgets/wxWidgets.git
-   GIT_SHALLOW ON
-)
-FetchContent_MakeAvailable(wxWidgets)
+# Use the system wxWidgets (e.g. libwxgtk3.2-dev on Debian)
+find_package(wxWidgets 3.2 REQUIRED COMPONENTS net core base)
+include(${wxWidgets_USE_FILE})
 
 # Find libav (FFmpeg) for audio processing
 find_package(PkgConfig REQUIRED)
@@ -71,10 +65,20 @@ target_include_directories(vo_studio PRIVATE
 )
 
 target_link_libraries(vo_studio PRIVATE
-    wxcore
-    wxnet
+    ${wxWidgets_LIBRARIES}
     nlohmann_json::nlohmann_json
     ${LIBAV_LIBRARIES}
 )
 
 target_compile_options(vo_studio PRIVATE ${LIBAV_CFLAGS_OTHER})
+
+if(UNIX AND NOT APPLE)
+    install(TARGETS vo_studio RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/vo-studio.desktop.in
+                   ${CMAKE_CURRENT_BINARY_DIR}/vo-studio.desktop @ONLY)
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/vo-studio.desktop
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/vo-studio.svg
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+endif()
